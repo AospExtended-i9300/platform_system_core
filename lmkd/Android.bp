@@ -1,0 +1,20 @@
+cc_binary {
+    name: "lmkd",
+
+    srcs: ["lmkd.c"],
+    shared_libs: [
+        "liblog",
+        "libcutils",
+    ],
+    cflags: ["-Werror"],
+
+    init_rc: ["lmkd.rc"],
+
+    product_variables: {
+        debuggable: {
+            cflags: [
+                "-DLMKD_TRACE_KILLS"
+            ],
+        },
+    },
+}
