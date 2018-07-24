@@ -1,0 +1,20 @@
+cc_library_headers {
+    name: "libhealthd_headers",
+    vendor_available: true,
+    export_include_dirs: ["include"],
+    header_libs: ["libbatteryservice_headers"],
+    export_header_lib_headers: ["libbatteryservice_headers"],
+}
+
+cc_library_static {
+    name: "libbatterymonitor",
+    srcs: ["BatteryMonitor.cpp"],
+    vendor_available: true,
+    export_include_dirs: ["include"],
+    shared_libs: [
+        "libutils",
+        "libbase",
+    ],
+    header_libs: ["libhealthd_headers"],
+    export_header_lib_headers: ["libhealthd_headers"],
+}
