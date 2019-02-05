@@ -1,0 +1,45 @@
+cc_library_headers {
+    name: "libnativebridge-dummy-headers",
+
+    host_supported: true,
+    export_include_dirs: ["include"],
+}
+
+cc_library {
+    name: "libnativebridge",
+
+    host_supported: true,
+    srcs: ["native_bridge.cc"],
+    header_libs: [
+        "libbase_headers",
+    ],
+    shared_libs: [
+        "liblog",
+    ],
+
+    target: {
+        android: {
+            version_script: "libnativebridge.map.txt",
+        },
+        linux: {
+            version_script: "libnativebridge.map.txt",
+        },
+    },
+
+    stubs: {
+        symbol_file: "libnativebridge.map.txt",
+        versions: ["1"],
+    },
+
+    export_include_dirs: ["include"],
+
+    cflags: [
+        "-Werror",
+        "-Wall",
+    ],
+    cppflags: [
+        "-fvisibility=protected",
+    ],
+}
+
+subdirs = ["tests"]
