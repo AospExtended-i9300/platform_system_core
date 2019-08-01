@@ -609,6 +609,8 @@ static void InitAborter(const char* abort_message) {
         return;
     }
 
+	LOG(INFO) << "rebooting into recovery (\"InitAborter\");";
+
     RebootSystem(ANDROID_RB_RESTART2, "recovery");
 }
 
