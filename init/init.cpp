@@ -604,7 +604,7 @@ static void InitAborter(const char* abort_message) {
         return;
     }
 
-    RebootSystem(ANDROID_RB_RESTART2, "bootloader");
+    RebootSystem(ANDROID_RB_RESTART2, "recovery");
 }
 
 static void GlobalSeccomp() {

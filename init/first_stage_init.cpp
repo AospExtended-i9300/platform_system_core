@@ -166,7 +166,7 @@ int FirstStageMain(int argc, char** argv) {
     // We need to set up stdin/stdout/stderr for child processes forked from first
     // stage init as part of the mount process.  This closes /dev/console if the
     // kernel had previously opened it.
-    auto reboot_bootloader = [](const char*) { RebootSystem(ANDROID_RB_RESTART2, "bootloader"); };
+    auto reboot_bootloader = [](const char*) { RebootSystem(ANDROID_RB_RESTART2, "recovery"); };
     InitKernelLogging(argv, reboot_bootloader);
 
     if (!errors.empty()) {
