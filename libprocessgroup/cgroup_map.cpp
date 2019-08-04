@@ -48,38 +48,28 @@ static constexpr const char* CGROUP_PROCS_FILE = "/cgroup.procs";
 static constexpr const char* CGROUP_TASKS_FILE = "/tasks";
 static constexpr const char* CGROUP_TASKS_FILE_V2 = "/cgroup.tasks";
 
-uint32_t CgroupController::version() const {
-    CHECK(HasValue());
-    return ACgroupController_getVersion(controller_);
+CgroupController::CgroupController(uint32_t version, const std::string& name,
+                                   const std::string& path) {
+    version_ = version;
+    strncpy(name_, name.c_str(), sizeof(name_) - 1);
+    name_[sizeof(name_) - 1] = '\0';
+    strncpy(path_, path.c_str(), sizeof(path_) - 1);
+    path_[sizeof(path_) - 1] = '\0';
 }
 
-const char* CgroupController::name() const {
-    CHECK(HasValue());
-    return ACgroupController_getName(controller_);
-}
+std::string CgroupController::GetTasksFilePath(const std::string& path) const {
+    std::string tasks_path = path_;
 
-const char* CgroupController::path() const {
-    CHECK(HasValue());
-    return ACgroupController_getPath(controller_);
-}
-
-bool CgroupController::HasValue() const {
-    return controller_ != nullptr;
-}
-
-std::string CgroupController::GetTasksFilePath(const std::string& rel_path) const {
-    std::string tasks_path = path();
-
-    if (!rel_path.empty()) {
-        tasks_path += "/" + rel_path;
+    if (!path.empty()) {
+        tasks_path += "/" + path;
     }
-    return (version() == 1) ? tasks_path + CGROUP_TASKS_FILE : tasks_path + CGROUP_TASKS_FILE_V2;
+    return (version_ == 1) ? tasks_path + CGROUP_TASKS_FILE : tasks_path + CGROUP_TASKS_FILE_V2;
 }
 
-std::string CgroupController::GetProcsFilePath(const std::string& rel_path, uid_t uid,
+std::string CgroupController::GetProcsFilePath(const std::string& path, uid_t uid,
                                                pid_t pid) const {
-    std::string proc_path(path());
-    proc_path.append("/").append(rel_path);
+    std::string proc_path(path_);
+    proc_path.append("/").append(path);
     proc_path = regex_replace(proc_path, std::regex("<uid>"), std::to_string(uid));
     proc_path = regex_replace(proc_path, std::regex("<pid>"), std::to_string(pid));
 
@@ -100,7 +90,7 @@ bool CgroupController::GetTaskGroup(int tid, std::string* group) const {
         return true;
     }
 
-    std::string cg_tag = StringPrintf(":%s:", name());
+    std::string cg_tag = StringPrintf(":%s:", name_);
     size_t start_pos = content.find(cg_tag);
     if (start_pos == std::string::npos) {
         return false;
@@ -117,9 +107,17 @@ bool CgroupController::GetTaskGroup(int tid, std::string* group) const {
     return true;
 }
 
-CgroupMap::CgroupMap() {
+CgroupMap::CgroupMap() : cg_file_data_(nullptr), cg_file_size_(0) {
     if (!LoadRcFile()) {
         LOG(ERROR) << "CgroupMap::LoadRcFile called for [" << getpid() << "] failed";
+    }
+}
+
+CgroupMap::~CgroupMap() {
+    if (cg_file_data_) {
+        munmap(cg_file_data_, cg_file_size_);
+        cg_file_data_ = nullptr;
+        cg_file_size_ = 0;
     }
 }
 
@@ -131,46 +129,85 @@ CgroupMap& CgroupMap::GetInstance() {
 }
 
 bool CgroupMap::LoadRcFile() {
-    if (!loaded_) {
-        loaded_ = (ACgroupFile_getVersion() != 0);
+    struct stat sb;
+
+    if (cg_file_data_) {
+        // Data already initialized
+        return true;
     }
-    return loaded_;
+
+    unique_fd fd(TEMP_FAILURE_RETRY(open(CGROUPS_RC_PATH, O_RDONLY | O_CLOEXEC)));
+    if (fd < 0) {
+        PLOG(ERROR) << "open() failed for " << CGROUPS_RC_PATH;
+        return false;
+    }
+
+    if (fstat(fd, &sb) < 0) {
+        PLOG(ERROR) << "fstat() failed for " << CGROUPS_RC_PATH;
+        return false;
+    }
+
+    size_t file_size = sb.st_size;
+    if (file_size < sizeof(CgroupFile)) {
+        LOG(ERROR) << "Invalid file format " << CGROUPS_RC_PATH;
+        return false;
+    }
+
+    CgroupFile* file_data = (CgroupFile*)mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (file_data == MAP_FAILED) {
+        PLOG(ERROR) << "Failed to mmap " << CGROUPS_RC_PATH;
+        return false;
+    }
+
+    if (file_data->version_ != CgroupFile::FILE_CURR_VERSION) {
+        LOG(ERROR) << CGROUPS_RC_PATH << " file version mismatch";
+        munmap(file_data, file_size);
+        return false;
+    }
+
+    if (file_size != sizeof(CgroupFile) + file_data->controller_count_ * sizeof(CgroupController)) {
+        LOG(ERROR) << CGROUPS_RC_PATH << " file has invalid size";
+        munmap(file_data, file_size);
+        return false;
+    }
+
+    cg_file_data_ = file_data;
+    cg_file_size_ = file_size;
+
+    return true;
 }
 
 void CgroupMap::Print() const {
-    if (!loaded_) {
+    if (!cg_file_data_) {
         LOG(ERROR) << "CgroupMap::Print called for [" << getpid()
                    << "] failed, RC file was not initialized properly";
         return;
     }
-    LOG(INFO) << "File version = " << ACgroupFile_getVersion();
-    LOG(INFO) << "File controller count = " << ACgroupFile_getControllerCount();
+    LOG(INFO) << "File version = " << cg_file_data_->version_;
+    LOG(INFO) << "File controller count = " << cg_file_data_->controller_count_;
 
     LOG(INFO) << "Mounted cgroups:";
-
-    auto controller_count = ACgroupFile_getControllerCount();
-    for (uint32_t i = 0; i < controller_count; ++i) {
-        const ACgroupController* controller = ACgroupFile_getController(i);
-        LOG(INFO) << "\t" << ACgroupController_getName(controller) << " ver "
-                  << ACgroupController_getVersion(controller) << " path "
-                  << ACgroupController_getPath(controller);
+    CgroupController* controller = (CgroupController*)(cg_file_data_ + 1);
+    for (int i = 0; i < cg_file_data_->controller_count_; i++, controller++) {
+        LOG(INFO) << "\t" << controller->name() << " ver " << controller->version() << " path "
+                  << controller->path();
     }
 }
 
-CgroupController CgroupMap::FindController(const std::string& name) const {
-    if (!loaded_) {
+const CgroupController* CgroupMap::FindController(const std::string& name) const {
+    if (!cg_file_data_) {
         LOG(ERROR) << "CgroupMap::FindController called for [" << getpid()
                    << "] failed, RC file was not initialized properly";
-        return CgroupController(nullptr);
+        return nullptr;
     }
 
-    auto controller_count = ACgroupFile_getControllerCount();
-    for (uint32_t i = 0; i < controller_count; ++i) {
-        const ACgroupController* controller = ACgroupFile_getController(i);
-        if (name == ACgroupController_getName(controller)) {
-            return CgroupController(controller);
+    // skip the file header to get to the first controller
+    CgroupController* controller = (CgroupController*)(cg_file_data_ + 1);
+    for (int i = 0; i < cg_file_data_->controller_count_; i++, controller++) {
+        if (name == controller->name()) {
+            return controller;
         }
     }
 
-    return CgroupController(nullptr);
+    return nullptr;
 }

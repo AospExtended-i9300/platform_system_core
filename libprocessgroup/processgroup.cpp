@@ -56,14 +56,14 @@ using namespace std::chrono_literals;
 #define PROCESSGROUP_CGROUP_PROCS_FILE "/cgroup.procs"
 
 bool CgroupGetControllerPath(const std::string& cgroup_name, std::string* path) {
-    auto controller = CgroupMap::GetInstance().FindController(cgroup_name);
+    const CgroupController* controller = CgroupMap::GetInstance().FindController(cgroup_name);
 
-    if (!controller.HasValue()) {
+    if (controller == nullptr) {
         return false;
     }
 
     if (path) {
-        *path = controller.path();
+        *path = controller->path();
     }
 
     return true;
@@ -107,7 +107,7 @@ bool UsePerAppMemcg() {
 
 static bool isMemoryCgroupSupported() {
     std::string cgroup_name;
-    static bool memcg_supported = CgroupMap::GetInstance().FindController("memory").HasValue();
+    static bool memcg_supported = (CgroupMap::GetInstance().FindController("memory") != nullptr);
 
     return memcg_supported;
 }

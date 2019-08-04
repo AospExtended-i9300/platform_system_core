@@ -31,7 +31,6 @@ cc_library {
     },
     shared_libs: [
         "libbase",
-        "libcgrouprc",
         "libjsoncpp",
     ],
     // for cutils/android_filesystem_config.h
